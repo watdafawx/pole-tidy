@@ -1,0 +1,11 @@
+{
+  "name": "pole-tidy",
+  "version": "0.1.3",
+  "title": "Pole Tidy",
+  "author": "mtopfox",
+  "factorio_version": "2.0",
+  "description": "Removes electric poles that other poles make redundant (as poles gain quality and cover more): a selection tool, and an optional auto mode when poles are upgraded. Never unpowers a building or splits a grid. Safe to add or remove at any time.",
+  "dependencies": [
+    "base >= 2.0"
+  ]
+}

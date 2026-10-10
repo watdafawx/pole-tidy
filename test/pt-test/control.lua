@@ -83,6 +83,10 @@ script.on_nth_tick(5, function(ev)
   local up = s.create_entity({ name = "medium-electric-pole", position = { 36.5, 2.5 }, force = f,
     quality = "legendary", raise_built = true })
   cu(up, poles[8])
+  -- AI Crew running poles to a dark machine: a fresh line end powering nothing yet stays
+  local run = s.create_entity({ name = "small-electric-pole", position = { 46.5, -6.5 }, force = f, raise_built = true })
+  cu(run, far)
+  storage.run = run
 end)
 
 script.on_nth_tick(130, function(ev)
@@ -93,6 +97,7 @@ script.on_nth_tick(130, function(ev)
     names[#names + 1] = p.name .. "@" .. p.position.x .. "," .. p.position.y
   end
   log("auto mode marked " .. #names .. ": " .. table.concat(names, " "))
+  if storage.run.to_be_deconstructed() then log("FAIL: auto mode removed a line still being run") end
   for _, p in pairs(s.find_entities_filtered({ type = "electric-pole", to_be_deconstructed = true })) do p.destroy() end
   local on, all, nets, n = 0, 0, {}, 0
   for _, m in pairs(s.find_entities_filtered({ type = "assembling-machine" })) do

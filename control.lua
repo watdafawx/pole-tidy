@@ -241,17 +241,31 @@ local function candidate(pole)
       and not has_circuit_wires(pole)
 end
 
+--- does anything powered stand in the pole's supply area?
+local function powers_anything(pole)
+  local d, p = supply(pole), pole.position
+  for _, e in pairs(pole.surface.find_entities_filtered({ area = { { p.x - d, p.y - d }, { p.x + d, p.y + d } }, force = pole.force })) do
+    local proto = e.type == "entity-ghost" and e.ghost_prototype or e.prototype
+    if proto.type ~= "electric-pole" and proto.electric_energy_source_prototype then return true end
+  end
+  return false
+end
+
 --- which of `poles` can go -> plan {remove = {pole}, wires = {{a, b}}}
-local function make_plan(poles)
+--- auto: the pole that was just built, and line ends powering nothing (a line still being run: AI Crew, bots,
+--- a script), stay
+local function make_plan(poles, auto)
   local plan = { removed = {}, virtual = {}, wires = {}, remove = {} }
   local list, key = {}, {}
   for _, p in pairs(poles) do
-    if candidate(p) then
-      list[#list + 1] = p
+    if candidate(p) and p ~= auto then
       -- lowest quality, smallest area, then fewest real wires (a pole hanging off the line before the line itself)
       local wires = 0
       for _, o in pairs(neighbours(p, plan)) do if not is_hidden(o) then wires = wires + 1 end end
-      key[p.unit_number] = { p.quality.level, supply(p), wires, p.unit_number }
+      if not (auto and wires <= 1 and not powers_anything(p)) then
+        list[#list + 1] = p
+        key[p.unit_number] = { p.quality.level, supply(p), wires, p.unit_number }
+      end
     end
   end
   table.sort(list, function(a, b)
@@ -362,7 +376,7 @@ script.on_nth_tick(60, function()
     local near = pole.surface.find_entities_filtered({ type = "electric-pole", force = pole.force,
       area = { { p.x - r, p.y - r }, { p.x + r, p.y + r } } })
     bfs_limit = AUTO_BFS_LIMIT
-    apply(make_plan(near))
+    apply(make_plan(near, pole))
     bfs_limit = BFS_LIMIT
   end
 end)

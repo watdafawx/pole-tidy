@@ -336,12 +336,36 @@ end)
 local mod_gui = require("mod-gui")
 local BUTTON = "pole_tidy_auto"
 
+-- (GUI Unifyer reskins the mod button bar but knows only its own list of buttons: ours take its button style, its
+-- "_selected" one while on, so they match the others)
+local function gu_style(button, on)
+  local base
+  if script.active_mods["GUI_Unifyer"] or script.active_mods["GUI_Unifyer_Unified"] then
+    local ok, s = pcall(function() return game.get_player(button.player_index).mod_settings["gu_button_style_setting"] end)
+    base = ok and s and s.value
+  end
+  local styles = prototypes.style  -- (built anew on each read)
+  if not (base and styles[base]) then
+    button.style = mod_gui.button_style
+    button.toggled = on == true
+    return
+  end
+  local selected = base .. "_selected"
+  if on and styles[selected] then
+    button.style = selected
+    button.toggled = false
+  else
+    button.style = base
+    button.toggled = on == true
+  end
+end
+
 local function sync_toggle()
   for _, p in pairs(game.players) do
     local flow = mod_gui.get_button_flow(p)
     local b = flow[BUTTON] or flow.add({ type = "sprite-button", name = BUTTON, sprite = "item/medium-electric-pole",
       style = mod_gui.button_style, tooltip = { "pole-tidy.auto-tooltip" } })
-    b.toggled = storage.auto == true
+    gu_style(b, storage.auto == true)
   end
 end
 
@@ -388,6 +412,9 @@ script.on_init(function()
 end)
 script.on_configuration_changed(sync_toggle)
 script.on_event(defines.events.on_player_created, sync_toggle)
+script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
+  if e.setting == "gu_button_style_setting" then sync_toggle() end
+end)
 script.on_event(defines.events.on_player_joined_game, sync_toggle)
 
 -- for automated tests
@@ -401,5 +428,6 @@ remote.add_interface("pole-tidy", {
   end,
   set_auto = function(on)
     storage.auto = on
+    sync_toggle()
   end,
 })

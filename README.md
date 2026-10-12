@@ -6,6 +6,7 @@ more, and the old dense grid is left behind; Pole Tidy finds the poles you no lo
 - **Pole tidy tool** (shortcut bar): drag over poles. The redundant ones are marked for deconstruction and your
   robots take them away. Shift-drag only shows which ones would go.
 - **Auto mode** (the lit button next to the tool): when a pole is upgraded, poles it makes redundant are removed. The pole that was just built, and line ends that power nothing yet (a line someone is still running, e.g. AI Crew), are left alone.
+- With **GUI Unifyer**, the button in the top-left mod bar takes its button style (lit while on), like the buttons it knows.
 
 A pole is only removed if every building it powers stays powered and no electric network gets split.
 Safe to add or remove at any time.

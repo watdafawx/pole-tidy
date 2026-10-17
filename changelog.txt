@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.1.7
+Date: 2026-10-17
+  Changes:
+    - Powered Concrete: poles over a powered floor are removed (the floor powers and joins what they did); a pole
+      joining two floors, or a floor to the grid, stays. The floor's own hidden poles are never touched or rewired,
+      and auto mode no longer takes them for poles to tidy.
+    - Fixed poles (hidden, or not deconstructable) are never removed and get no new wires.
+    - Faster when buildings stand on a powered floor.
+---------------------------------------------------------------------------------------------------
 Version: 0.1.6
 Date: 2026-10-14
   Changes:

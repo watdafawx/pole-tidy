@@ -5,6 +5,8 @@
 --      is added between two of them in reach when needed), and the buildings' hidden poles it was wired to still
 --      reach them.
 -- Poles with circuit wires are kept. Lowest quality / smallest supply area goes first.
+-- Fixed poles (hidden or not deconstructable: Powered Concrete's under each powered tile) are never removed and get
+-- no new wires; a floor of them wired together counts as one node of the grid.
 
 local COPPER = defines.wire_connector_id.pole_copper
 local BFS_LIMIT = 4000
@@ -12,8 +14,55 @@ local AUTO_BFS_LIMIT = 80    -- auto mode: a smaller search (a pole whose grid i
 local bfs_limit = BFS_LIMIT
 local HIDDEN = "power%-propagation%-invisible%-pole"
 
+local FLOOR_LIMIT = 50000      -- the tool: a larger floor is a dead end (the poles around it are kept)
+local AUTO_FLOOR_LIMIT = 3000  -- auto mode walks a floor only out from the poles it checks, this many of its poles a search
+local floor_limit = FLOOR_LIMIT
+local collapse = true          -- the tool: a floor as one node (one walk over it a plan); auto: pole by pole
+
 local function is_hidden(pole)
   return string.find(pole.name, HIDDEN) ~= nil
+end
+
+local fixed_names = {}
+local function is_fixed(pole)
+  local v = fixed_names[pole.name]
+  if v == nil then
+    local p = pole.prototype
+    v = not is_hidden(pole) and (p.hidden or p.has_flag("not-deconstructable")) or false
+    fixed_names[pole.name] = v
+  end
+  return v
+end
+
+--- the floor (fixed poles wired together) `pole` belongs to, once per plan: its first pole stands for all of them,
+--- with the other poles wired to the floor as its neighbours. A floor past floor_limit has none (a dead end).
+local function floor_node(pole, plan)
+  local u = pole.unit_number
+  local node = plan.floor[u]
+  if node then return node end
+  local seen, todo, head, exits, out = { [u] = true }, { pole }, 1, {}, {}
+  local whole = true
+  while todo[head] and whole do
+    local c = todo[head].get_wire_connector(COPPER, false)
+    head = head + 1
+    for _, w in pairs(c and c.connections or {}) do
+      local o = w.target.owner
+      local ou = o.valid and o.unit_number
+      if ou and is_fixed(o) then
+        if not seen[ou] then
+          seen[ou] = true
+          todo[#todo + 1] = o
+          if #todo > floor_limit then whole = false break end
+        end
+      elseif ou and not exits[ou] then
+        exits[ou] = true
+        out[#out + 1] = o
+      end
+    end
+  end
+  for x in pairs(seen) do plan.floor[x] = pole end
+  plan.exits[u] = whole and out or {}
+  return pole
 end
 
 local max_supply
@@ -47,14 +96,25 @@ local function has_circuit_wires(pole)
   return false
 end
 
---- copper neighbours of a pole, plus wires the plan has added
+--- copper neighbours of a pole, plus wires the plan has added (a floor: see floor_node)
 local function neighbours(pole, plan)
-  local out = {}
+  if collapse and is_fixed(pole) then return plan.exits[floor_node(pole, plan).unit_number] end
+  local out, floors = {}, {}
   local c = pole.get_wire_connector(COPPER, false)
   if c then
     for _, w in pairs(c.connections) do
       local o = w.target.owner
-      if o.valid then out[#out + 1] = o end
+      if o.valid then
+        if collapse and is_fixed(o) then
+          o = floor_node(o, plan)
+          if not floors[o.unit_number] then
+            floors[o.unit_number] = true
+            out[#out + 1] = o
+          end
+        else
+          out[#out + 1] = o
+        end
+      end
     end
   end
   for _, o in pairs(plan.virtual[pole.unit_number] or {}) do
@@ -72,7 +132,7 @@ end
 local function bfs(start, plan, real_only, stop)
   local seen, todo, head = { [start.unit_number] = start }, { start }, 1
   if stop and stop(start) then return seen, true end
-  local n = 1
+  local n, nf = 1, 0
   while todo[head] do
     local p = todo[head]
     head = head + 1
@@ -81,8 +141,8 @@ local function bfs(start, plan, real_only, stop)
       if u and not seen[u] and not gone(o, plan) and not (real_only and is_hidden(o)) then
         seen[u] = o
         if stop and stop(o) then return seen, true end
-        n = n + 1
-        if n > bfs_limit then return seen, false end
+        if not collapse and is_fixed(o) then nf = nf + 1 else n = n + 1 end
+        if n > bfs_limit or nf > floor_limit then return seen, false end
         todo[#todo + 1] = o
       end
     end
@@ -115,13 +175,17 @@ local function coverage_ok(pole, plan)
       end
       if overlaps(pole, d, box) and not self_powered then
         local covered = false
-        local near = pole.surface.find_entities_filtered({ type = "electric-pole", force = pole.force,
-          area = { { box.left_top.x - reach, box.left_top.y - reach }, { box.right_bottom.x + reach, box.right_bottom.y + reach } } })
-        for _, q in pairs(near) do
-          if q ~= pole and not gone(q, plan) and overlaps(q, supply(q), box) then
-            covered = true
-            break
+        -- first the poles standing on it (a powered floor's), then everything in reach
+        for _, r in pairs({ 0.5, reach }) do
+          local near = pole.surface.find_entities_filtered({ type = "electric-pole", force = pole.force,
+            area = { { box.left_top.x - r, box.left_top.y - r }, { box.right_bottom.x + r, box.right_bottom.y + r } } })
+          for _, q in pairs(near) do
+            if q ~= pole and not gone(q, plan) and overlaps(q, supply(q), box) then
+              covered = true
+              break
+            end
           end
+          if covered then break end
         end
         if not covered then return false end
       end
@@ -183,7 +247,7 @@ local function grid_ok(pole, plan)
       for _, a in pairs(g.members) do
         for _, h in pairs(joined) do
           for _, b in pairs(h.members) do
-            if dist(a, b) <= math.min(wire_reach(a), wire_reach(b)) then
+            if not (is_fixed(a) or is_fixed(b)) and dist(a, b) <= math.min(wire_reach(a), wire_reach(b)) then
               found = { gi, a, b }
               break
             end
@@ -237,7 +301,8 @@ local function grid_ok(pole, plan)
 end
 
 local function candidate(pole)
-  return pole.valid and pole.type == "electric-pole" and not is_hidden(pole) and not pole.to_be_deconstructed()
+  return pole.valid and pole.type == "electric-pole" and not is_hidden(pole) and not is_fixed(pole)
+      and not pole.to_be_deconstructed()
       and not has_circuit_wires(pole)
 end
 
@@ -255,12 +320,13 @@ end
 --- auto: the pole that was just built, and line ends powering nothing (a line still being run: AI Crew, bots,
 --- a script), stay
 local function make_plan(poles, auto)
-  local plan = { removed = {}, virtual = {}, wires = {}, remove = {} }
+  local plan = { removed = {}, virtual = {}, wires = {}, remove = {}, floor = {}, exits = {} }
   local list, key = {}, {}
   for _, p in pairs(poles) do
     if candidate(p) and p ~= auto then
       -- lowest quality, smallest area, then fewest real wires (a pole hanging off the line before the line itself)
       local wires = 0
+      -- (a floor's poles count: a pole wired to a powered floor is no line end)
       for _, o in pairs(neighbours(p, plan)) do if not is_hidden(o) then wires = wires + 1 end end
       if not (auto and wires <= 1 and not powers_anything(p)) then
         list[#list + 1] = p
@@ -380,7 +446,7 @@ end)
 local function on_pole_built(e)
   if not storage.auto then return end
   local pole = e.entity
-  if not (pole and pole.valid and pole.type == "electric-pole") or is_hidden(pole) then return end
+  if not (pole and pole.valid and pole.type == "electric-pole") or is_hidden(pole) or is_fixed(pole) then return end
   storage.pending = storage.pending or {}
   if #storage.pending < 200 then storage.pending[#storage.pending + 1] = pole end
 end
@@ -389,20 +455,24 @@ local filter = { { filter = "type", type = "electric-pole" } }
 script.on_event(defines.events.script_raised_built, on_pole_built, filter)
 script.on_event(defines.events.on_robot_built_entity, on_pole_built, filter)
 
+--- auto mode's plan around an upgraded pole
+local function auto_plan(pole)
+  local r = math.max(wire_reach(pole), supply(pole)) + 1
+  local p = pole.position
+  local near = pole.surface.find_entities_filtered({ type = "electric-pole", force = pole.force,
+    area = { { p.x - r, p.y - r }, { p.x + r, p.y + r } } })
+  bfs_limit, floor_limit, collapse = AUTO_BFS_LIMIT, AUTO_FLOOR_LIMIT, false
+  local plan = make_plan(near, pole)
+  bfs_limit, floor_limit, collapse = BFS_LIMIT, FLOOR_LIMIT, true
+  return plan
+end
+
 -- one upgraded pole per second (Upgradeable Quality upgrades many at once: spread them out)
 script.on_nth_tick(60, function()
   local pending = storage.pending
   if not pending or #pending == 0 then return end
   local pole = table.remove(pending, 1)
-  if pole.valid then
-    local r = math.max(wire_reach(pole), supply(pole)) + 1
-    local p = pole.position
-    local near = pole.surface.find_entities_filtered({ type = "electric-pole", force = pole.force,
-      area = { { p.x - r, p.y - r }, { p.x + r, p.y + r } } })
-    bfs_limit = AUTO_BFS_LIMIT
-    apply(make_plan(near, pole))
-    bfs_limit = BFS_LIMIT
-  end
+  if pole.valid then apply(auto_plan(pole)) end
 end)
 
 script.on_init(function()
@@ -421,6 +491,10 @@ script.on_event(defines.events.on_player_joined_game, sync_toggle)
 remote.add_interface("pole-tidy", {
   plan = function(poles)
     local plan = make_plan(poles)
+    return #plan.remove, #plan.wires
+  end,
+  auto_plan = function(pole)
+    local plan = auto_plan(pole)
     return #plan.remove, #plan.wires
   end,
   tidy = function(poles)

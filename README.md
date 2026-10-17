@@ -9,6 +9,8 @@ more, and the old dense grid is left behind; Pole Tidy finds the poles you no lo
 - With **GUI Unifyer**, the button in the top-left mod bar takes its button style (lit while on), like the buttons it knows.
 
 A pole is only removed if every building it powers stays powered and no electric network gets split.
+Works with **Powered Concrete**: poles over a powered floor go, the floor's own hidden poles stay, and a pole that
+joins two floors (or a floor to the grid) is kept.
 Safe to add or remove at any time.
 
 ## Install
